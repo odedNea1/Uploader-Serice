@@ -1,113 +1,66 @@
-# Upload Service
+Upload Service – Home Assignment
 
-A production-grade Python service for uploading files to Amazon S3 with parallel upload support, logging, and validation.
+This project implements a file upload service that monitors folders and uploads matching files to S3. It supports retries, resumable uploads, and concurrent uploads using threads. The focus was on delivering a clean, minimal, working solution, while making deliberate design decisions and trade-offs under time constraints.
 
-## Features
+Design Choices and Assumptions:
 
-- Recursive file scanning with glob pattern support
-- Parallel file uploads using ThreadPoolExecutor
-- Comprehensive logging and tracking
-- S3 upload validation (ETag, file size)
-- Clean CLI interface using Typer
-- Type hints and modern Python practices
-- Comprehensive test coverage
+MVP Persistence:
+To support resumable uploads, I chose to store the state in a local JSON file. This was a quick and effective way to meet the requirement with minimal setup.
+If I had more time, I would persist the state in a database, which would allow coordination across multiple machines or processes and better fault tolerance.
 
-## Installation
+Retry Logic:
+The tenacity library was used to automatically retry transient failures such as timeouts or service errors when uploading to S3. Retry strategies like exponential backoff were configured with sensible defaults.
+With more time, I would have moved these parameters (e.g., number of retries, backoff strategy) into a config file for flexibility.
 
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd upload-service
-```
+Concurrent Uploads:
+File uploads are processed using a thread pool. This allows concurrent uploads within a single process. Each file upload runs in its own thread.
+This is enough for the scope of the assignment, but in a production system I would consider async uploads or distributed workers for better scalability.
 
-2. Install dependencies:
-```bash
-pip install -e .
-```
+State File Locking:
+Since multiple threads may update the state file, I added a lock to protect file writes. This works within a single process.
+In a real-world setting, we'd likely need to use a transactional database or a file lock mechanism that supports cross-process safety.
 
-## Configuration
+File Pattern Support:
+The service uses glob-style matching to detect files to upload. In the tests we used *.txt as an example, but the implementation supports any pattern. The assumption is that matching patterns are defined per upload request.
 
-The service uses environment variables for AWS credentials. Create a `.env` file in the project root:
+Periodic Scanning vs. Always-On Monitoring:
+The system uses periodic scanning of folders (polling) instead of relying on file system watchers like inotify (Linux) or watchdog (cross-platform).
+This means the process doesn’t have to keep a file handle open or maintain a persistent connection to detect changes. It can be activated periodically (e.g., via a cron job or service scheduler).
+If this were a long-running daemon, a file watcher could reduce delay and CPU usage. But for simplicity, portability, and predictable behavior, scanning was chosen.
 
-```bash
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_REGION=your_region
-```
+Simplicity Over Complexity:
+The goal was to prioritize clarity and simplicity. For example:
+    State is stored in a file, not a database.
+    Metadata handling is optional.
+    Chunk size and other thresholds are hardcoded for now (but could be moved to a config).
 
-## Usage
+Trade-offs:
+| Feature                | Chosen                      | Alternatives                     | Reason                                                 |
+| ---------------------- | --------------------------- | -------------------------------- | ------------------------------------------------------ |
+| State persistence      | JSON file                   | Database, Redis                  | Quick to implement, good enough for MVP                |
+| Upload retries         | `tenacity`                  | Custom logic                     | Readable and reliable                                  |
+| Concurrency model      | ThreadPoolExecutor          | Async, multiprocessing           | Simple to test and reason about                        |
+| File scanning strategy | Periodic folder scan (glob) | Inotify, watchdog (event-driven) | Platform-independent, works without long-lived process |
+| File pattern support   | Configurable glob patterns  | Regex, MIME checks               | Simple and flexible enough                             |
 
-### CLI
 
-Upload files using the command-line interface:
+    Install dependencies:
+poetry install
 
-```bash
-python -m upload_service upload \
-    /path/to/source/folder \
-    destination-bucket \
-    --upload-id unique-id \
-    --pattern "**/*.txt" \
-    --name "My Upload" \
-    --type "data" \
-    --description "Test upload" \
-    --log-dir /path/to/logs \
-    --max-workers 5
-```
+Activate virtual environment:
+poetry shell
 
-### Python API
+Run the CLI to register and monitor an upload:
+python -m upload_service.cli register --source ./my_files --bucket my-bucket --pattern "*.txt"
 
-Use the service programmatically:
+Run the monitor:
+python -m upload_service.cli monitor
 
-```python
-from pathlib import Path
-from upload_service import UploadCoordinator, UploadRequest
+Run tests:
+    pytest -v
 
-coordinator = UploadCoordinator(log_dir=Path("/path/to/logs"))
-request = UploadRequest(
-    upload_id="unique-id",
-    source_folder=Path("/path/to/source/folder"),
-    destination_bucket="destination-bucket",
-    pattern="**/*.txt",
-    name="My Upload",
-    type="data",
-    description="Test upload"
-)
-
-summary = coordinator.process_upload(request)
-print(f"Uploaded {summary.successful_uploads}/{summary.total_files} files")
-```
-
-## Testing
-
-Run the test suite:
-
-```bash
-pytest tests/
-```
-
-## Project Structure
-
-```
-upload_service/
-├── __init__.py
-├── coordinator.py    # Main orchestrator
-├── scanner.py       # File discovery
-├── uploader.py      # S3 upload handling
-├── tracker.py       # Logging and tracking
-├── models.py        # Data structures
-└── cli.py           # Command-line interface
-tests/
-└── test_upload_service.py
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 
+If I Had More Time:
+    Persist state to a shared database.
+    Move chunk size, scan interval, and retry configs to a YAML or .env config file.
+    Use async or multi-process uploads for higher throughput.
+    Build a small web UI to track progress.
