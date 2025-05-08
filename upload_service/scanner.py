@@ -1,50 +1,99 @@
+"""
+Module for scanning folders and detecting file changes.
+"""
 import logging
 from pathlib import Path
-from typing import Iterator
+from typing import List, Set, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 class FileScanner:
-    """Handles file discovery using glob patterns."""
+    """Scans folders for files and tracks changes."""
     
-    def __init__(self, source_folder: Path, pattern: str):
-        """Initialize the scanner with source folder and glob pattern.
+    def __init__(self):
+        """Initialize the file scanner."""
+        self._cache: Dict[str, Dict[Path, float]] = {}
+        
+    def scan_folder(self, folder: Path, pattern: str = "*") -> List[Path]:
+        """Scan a folder for files matching the pattern.
         
         Args:
-            source_folder: Root directory to scan
-            pattern: Glob pattern to match files
-        """
-        self.source_folder = source_folder
-        self.pattern = pattern
-        
-    def scan_files(self) -> Iterator[Path]:
-        """Scan the source folder recursively for files matching the pattern.
-        
-        Yields:
-            Path objects for each matching file
-        """
-        logger.info(f"Scanning {self.source_folder} for files matching pattern: {self.pattern}")
-        
-        try:
-            for file_path in self.source_folder.rglob(self.pattern):
-                if file_path.is_file():
-                    logger.debug(f"Found matching file: {file_path}")
-                    yield file_path
-        except Exception as e:
-            logger.error(f"Error scanning files: {str(e)}")
-            raise
-            
-    def get_relative_path(self, file_path: Path) -> Path:
-        """Get the relative path of a file from the source folder.
-        
-        Args:
-            file_path: Absolute path of the file
+            folder: Path to the folder to scan
+            pattern: Glob pattern to match files against
             
         Returns:
-            Path object representing the relative path
+            List of file paths found
+        """
+        if not folder.exists():
+            logger.error(f"Folder does not exist: {folder}")
+            return []
+            
+        try:
+            return [p for p in folder.glob(pattern) if p.is_file()]
+        except Exception as e:
+            logger.error(f"Error scanning folder {folder}: {e}")
+            return []
+            
+    def get_changes(self, folder: Path, pattern: str = "*") -> Set[Path]:
+        """Get files that have changed since last scan.
+        
+        Args:
+            folder: Path to the folder to scan
+            pattern: Glob pattern to match files against
+            
+        Returns:
+            Set of changed file paths
+        """
+        cache_key = f"{folder}:{pattern}"
+        previous = self._cache.get(cache_key, {})
+        current = {}
+        changed = set()
+        
+        try:
+            # Scan current state
+            for path in folder.glob(pattern):
+                if path.is_file():
+                    mtime = path.stat().st_mtime
+                    current[path] = mtime
+                    
+                    # Check if file is new or modified
+                    if path not in previous or mtime > previous[path]:
+                        changed.add(path)
+                        
+            # Update cache
+            self._cache[cache_key] = current
+            
+            return changed
+            
+        except Exception as e:
+            logger.error(f"Error checking for changes in {folder}: {e}")
+            return set()
+            
+    def clear_cache(self, folder: Optional[Path] = None,
+                   pattern: Optional[str] = None) -> None:
+        """Clear the file modification cache.
+        
+        Args:
+            folder: Optional folder to clear cache for
+            pattern: Optional pattern to clear cache for
+        """
+        if folder and pattern:
+            self._cache.pop(f"{folder}:{pattern}", None)
+        else:
+            self._cache.clear()
+            
+    def get_relative_path(self, file_path: Path, base_path: Path) -> Path:
+        """Get the relative path of a file from a base path.
+        
+        Args:
+            file_path: Path to the file
+            base_path: Base path to make relative to
+            
+        Returns:
+            Relative path from base_path to file_path
         """
         try:
-            return file_path.relative_to(self.source_folder)
+            return file_path.relative_to(base_path)
         except ValueError:
-            logger.error(f"File {file_path} is not under source folder {self.source_folder}")
-            raise 
+            logger.error(f"File {file_path} is not relative to {base_path}")
+            return file_path 
