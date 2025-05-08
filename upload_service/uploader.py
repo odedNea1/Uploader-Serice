@@ -78,13 +78,6 @@ class S3Uploader:
                 etag=None
             )
             
-    @retry(
-        retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        before=before_log(logger, logging.DEBUG),
-        after=after_log(logger, logging.DEBUG)
-    )
     def _multipart_upload(self, file_path: Path, bucket: str, s3_key: str,
                          metadata: Optional[Dict[str, str]] = None) -> UploadResult:
         """Handle multipart upload for large files with retries.
@@ -99,79 +92,17 @@ class S3Uploader:
             UploadResult object
         """
         size_bytes = file_path.stat().st_size
-        
+        extra_args = {'Metadata': metadata} if metadata else {}
         try:
-            # Initialize multipart upload
-            extra_args = {'Metadata': metadata} if metadata else {}
-            mpu = self.s3_client.create_multipart_upload(
-                Bucket=bucket,
-                Key=s3_key,
-                **extra_args
-            )
-            upload_id = mpu['UploadId']
-            
-            # Upload parts
-            parts = []
-            offset = 0
-            part_number = 1
-            
-            with open(file_path, 'rb') as f:
-                while offset < size_bytes:
-                    chunk = f.read(self.chunk_size)
-                    if not chunk:
-                        break
-                        
-                    # Upload part with retry
-                    part = self._upload_part(
-                        bucket, s3_key, upload_id,
-                        part_number, chunk
-                    )
-                    parts.append({
-                        'PartNumber': part_number,
-                        'ETag': part['ETag']
-                    })
-                    
-                    offset += len(chunk)
-                    part_number += 1
-                    
-            # Complete multipart upload
-            self.s3_client.complete_multipart_upload(
-                Bucket=bucket,
-                Key=s3_key,
-                UploadId=upload_id,
-                MultipartUpload={'Parts': parts}
-            )
-            
-            return UploadResult(
-                file_path=file_path,
-                s3_key=s3_key,
-                success=True,
-                error=None,
-                size_bytes=size_bytes,
-                etag=parts[-1]['ETag'] if parts else None
-            )
-            
+            return self._multipart_upload_with_retries(file_path, bucket, s3_key, extra_args)
         except Exception as e:
             logger.error(f"Error in multipart upload for {file_path} to {s3_key}: {e}")
-            
-            # Attempt to abort the multipart upload
-            try:
-                if 'upload_id' in locals():
-                    self.s3_client.abort_multipart_upload(
-                        Bucket=bucket,
-                        Key=s3_key,
-                        UploadId=upload_id
-                    )
-            except Exception as abort_error:
-                logger.error(f"Error aborting multipart upload: {abort_error}")
-                
             return UploadResult(
                 file_path=file_path,
                 s3_key=s3_key,
                 success=False,
                 error=str(e),
-                size_bytes=size_bytes,
-                etag=None
+                size_bytes=size_bytes
             )
             
     @retry(
