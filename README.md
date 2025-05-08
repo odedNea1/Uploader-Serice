@@ -44,20 +44,20 @@ Trade-offs:
 | File pattern support   | Configurable glob patterns  | Regex, MIME checks               | Simple and flexible enough                             |
 
 
-    Install dependencies:
-poetry install
+Install dependencies:
+`poetry install`
 
 Activate virtual environment:
-poetry shell
+`poetry shell`
 
 Run the CLI to register and monitor an upload:
-python -m upload_service.cli register --source ./my_files --bucket my-bucket --pattern "*.txt"
+`python -m upload_service.cli register --source ./my_files --bucket my-bucket --pattern "*.txt"`
 
 Run the monitor:
-python -m upload_service.cli monitor
+`python -m upload_service.cli monitor`
 
 Run tests:
-    pytest -v
+`pytest -v`
 
 If I Had More Time:
     Persist state to a shared database.
