@@ -132,49 +132,6 @@ def test_concurrent_uploads_handle_errors(tmp_upload_dir, mock_aws):
     assert summary.successful_uploads == 2
     assert summary.failed_uploads == 1
 
-def test_is_retryable_error():
-    """Test error classification for retries."""
-    retryable_codes = [
-        'RequestTimeout',
-        'RequestTimeoutException',
-        'PriorRequestNotComplete',
-        'ConnectionError',
-        'ThrottlingException',
-        'ThrottledException',
-        'ServiceUnavailable',
-        'Throttling',
-        '5XX'
-    ]
-    
-    non_retryable_codes = [
-        'AccessDenied',
-        'NoSuchBucket',
-        'InvalidRequest'
-    ]
-    
-    for code in retryable_codes:
-        error = ClientError(
-            {
-                'Error': {
-                    'Code': code,
-                    'Message': 'Test error'
-                }
-            },
-            'test_operation'
-        )
-        assert is_retryable_error(error)
-        
-    for code in non_retryable_codes:
-        error = ClientError(
-            {
-                'Error': {
-                    'Code': code,
-                    'Message': 'Test error'
-                }
-            },
-            'test_operation'
-        )
-        assert not is_retryable_error(error)
 
 def test_multipart_upload_aborts_on_failure(tmp_upload_dir, mock_aws):
     """Test that multipart upload is aborted on failure."""

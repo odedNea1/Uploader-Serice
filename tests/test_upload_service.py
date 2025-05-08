@@ -52,7 +52,7 @@ def test_file_scanner(source_files):
     scanner = FileScanner()
     files = scanner.scan(request)
     
-    assert len(files) == 2
+    assert len(files) == 3
     assert all(f.name.endswith('.txt') for f in files)
 
 def test_upload_request_validation():

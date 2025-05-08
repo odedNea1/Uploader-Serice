@@ -20,29 +20,6 @@ from .models import UploadResult, UploadSummary
 
 logger = logging.getLogger(__name__)
 
-def is_retryable_error(exception: Exception) -> bool:
-    """Check if an exception should trigger a retry.
-    
-    Args:
-        exception: The exception to check
-        
-    Returns:
-        True if the error is retryable, False otherwise
-    """
-    if isinstance(exception, ClientError):
-        error_code = exception.response['Error']['Code']
-        return error_code in {
-            'RequestTimeout',
-            'RequestTimeoutException',
-            'PriorRequestNotComplete',
-            'ConnectionError',
-            'ThrottlingException',
-            'ThrottledException',
-            'ServiceUnavailable',
-            'Throttling',
-            '5XX'
-        }
-    return False
 
 class S3Uploader:
     """Handles file uploads to S3 with retry logic."""

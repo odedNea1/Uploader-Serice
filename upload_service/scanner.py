@@ -40,6 +40,9 @@ class FileScanner:
         if not folder.exists():
             logger.error(f"Folder does not exist: {folder}")
             return []
+        
+        if not pattern.startswith("**/"):
+            pattern = f"**/{pattern}"
             
         try:
             return [p for p in folder.glob(pattern) if p.is_file()]
