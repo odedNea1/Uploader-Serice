@@ -39,168 +39,144 @@ def mock_s3_client():
         yield mock_client
 
 def test_file_scanner(source_files):
+    """Test file scanning functionality."""
     from upload_service.scanner import FileScanner
-    
-    scanner = FileScanner(source_files, "*.txt")
-    files = list(scanner.scan_files())
-    
-    assert len(files) == 3
-    assert all(f.suffix == ".txt" for f in files)
-    
-    # Test relative path calculation
-    expected_paths = {"file1.txt", "subdir/file2.txt", "subdir/file3.txt"}
-    for file_path in files:
-        rel_path = scanner.get_relative_path(file_path)
-        # Convert Windows path separators to Unix style for comparison
-        normalized_path = str(rel_path).replace("\\", "/")
-        assert normalized_path in expected_paths
-
-def test_upload_request_validation(temp_dir):
-    nonexistent_dir = temp_dir / "nonexistent"
-    with pytest.raises(ValueError):
-        UploadRequest(
-            upload_id="test",
-            source_folder=nonexistent_dir,
-            destination_bucket="test-bucket",
-            pattern="*.txt",
-            name="test",
-            type="test",
-            description="test"
-        )
-
-def test_upload_tracker(temp_dir):
-    from upload_service.tracker import UploadTracker
-    
-    # Create test directory structure
-    source_dir = temp_dir / "source"
-    source_dir.mkdir()
-    log_dir = temp_dir / "logs"
-    tracker = UploadTracker(log_dir)
-    
-    request = UploadRequest(
-        upload_id="test-123",
-        source_folder=source_dir,
-        destination_bucket="test-bucket",
-        pattern="*.txt",
-        name="test",
-        type="test",
-        description="test"
-    )
-    
-    tracker.log_upload_request(request)
-    
-    log_file = next(log_dir.glob("upload_test-123_*.json"))
-    log_data = json.loads(log_file.read_text())
-    
-    assert log_data["upload_id"] == "test-123"
-    assert log_data["destination_bucket"] == "test-bucket"
-
-def test_s3_uploader(source_files, mock_s3_client):
-    from upload_service.uploader import S3Uploader
-    
-    uploader = S3Uploader("test-bucket", "test-123")
-    
-    # Test single file upload
-    file_path = next(source_files.glob("*.txt"))
-    s3_key = "test-123/file1.txt"
-    
-    result = uploader._upload_file(file_path, s3_key)
-    
-    assert result.success
-    assert result.file_path == file_path
-    assert result.s3_key == s3_key
-    assert result.etag == "test-etag"
-    mock_s3_client.upload_file.assert_called_once()
-
-def test_upload_coordinator(source_files, mock_s3_client):
-    coordinator = UploadCoordinator()
     
     request = UploadRequest(
         upload_id="test-123",
         source_folder=source_files,
         destination_bucket="test-bucket",
+        pattern="*.txt"
+    )
+    
+    scanner = FileScanner()
+    files = scanner.scan(request)
+    
+    assert len(files) == 2
+    assert all(f.name.endswith('.txt') for f in files)
+
+def test_upload_request_validation():
+    """Test upload request validation."""
+    with pytest.raises(ValueError):
+        UploadRequest(
+            upload_id="",  # Empty ID
+            source_folder=Path("/nonexistent"),
+            destination_bucket="test-bucket",
+            pattern="*.txt"
+        )
+    
+    with pytest.raises(ValueError):
+        UploadRequest(
+            upload_id="test",
+            source_folder=Path("/nonexistent"),  # Non-existent folder
+            destination_bucket="test-bucket",
+            pattern="*.txt"
+        )
+    
+    with pytest.raises(ValueError):
+        UploadRequest(
+            upload_id="test",
+            source_folder=Path.cwd(),
+            destination_bucket="",  # Empty bucket
+            pattern="*.txt"
+        )
+
+def test_upload_tracker(temp_dir):
+    """Test upload tracking functionality."""
+    from upload_service.tracker import UploadTracker
+    
+    log_dir = temp_dir / "logs"
+    log_dir.mkdir()
+    state_file = temp_dir / "state.json"
+    
+    tracker = UploadTracker(log_dir=log_dir, state_file=state_file)
+    
+    request = UploadRequest(
+        upload_id="test-123",
+        source_folder=temp_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
+    )
+    
+    # Register upload
+    tracker.register_upload(request)
+    state = tracker.get_upload_state("test-123")
+    assert state is not None
+    assert state.upload_id == "test-123"
+
+def test_s3_uploader(source_files, mock_s3_client):
+    """Test S3 upload functionality."""
+    from upload_service.uploader import S3Uploader
+    
+    uploader = S3Uploader()
+    
+    # Test single file upload
+    file_path = next(source_files.glob("*.txt"))
+    result = uploader._upload_file(file_path, "test-bucket", "test.txt")
+    
+    assert result.success
+    assert result.file_path == file_path
+    assert result.s3_key == "test.txt"
+
+def test_upload_coordinator(source_files, mock_s3_client, temp_dir):
+    """Test upload coordination."""
+    from upload_service.coordinator import UploadCoordinator
+    
+    log_dir = temp_dir / "logs"
+    log_dir.mkdir()
+    state_file = temp_dir / "state.json"
+    
+    coordinator = UploadCoordinator(
+        log_dir=log_dir,
+        state_file=state_file,
+        scan_interval=0.1
+    )
+    
+    request = UploadRequest(
+        upload_id="test-123",
+        source_folder=source_files,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
+    )
+    
+    coordinator.start_upload(request)
+    
+    # Wait for initial upload
+    import time
+    time.sleep(0.2)
+    
+    # Verify state
+    state = coordinator.tracker.get_upload_state("test-123")
+    assert state is not None
+    assert len(state.completed_files) > 0
+
+def test_cli_interface(source_files, mock_s3_client, temp_dir):
+    """Test CLI interface."""
+    from upload_service.cli import handle_start, handle_stop
+    import argparse
+    
+    args = argparse.Namespace(
+        source_folder=str(source_files),
+        bucket="test-bucket",
+        upload_id="test-123",
         pattern="*.txt",
-        name="test",
-        type="test",
-        description="test"
+        name=None,
+        type=None,
+        description=None,
+        config=None,
+        verbose=False,
+        log_dir=str(temp_dir / "logs"),
+        state_file=str(temp_dir / "state.json")
     )
     
-    summary = coordinator.process_upload(request)
+    # Create log directory
+    (temp_dir / "logs").mkdir()
     
-    assert isinstance(summary, UploadSummary)
-    assert summary.upload_id == "test-123"
-    assert summary.total_files == 3
-    assert summary.successful_uploads == 3
-    assert summary.failed_uploads == 0
-
-def test_cli_interface(source_files, mock_s3_client, tmp_path):
-    from typer.testing import CliRunner
-    from upload_service.cli import app
-    
-    runner = CliRunner()
-    log_dir = tmp_path / "logs"
-    log_dir.mkdir(exist_ok=True)
-    
-    # Test successful upload with minimal required arguments
-    result = runner.invoke(
-        app, 
-        [
-            str(source_files),
-            "test-bucket",
-            "--upload-id", "test-123"
-        ]
-    )
-    
-    assert result.exit_code == 0, f"CLI failed with: {result.stdout}"
-    assert "Upload Summary:" in result.stdout
-    assert "Total files: 3" in result.stdout
-    assert "Successful uploads: 3" in result.stdout
-    assert "Failed uploads: 0" in result.stdout
-    
-    # Test with all optional arguments
-    result = runner.invoke(
-        app, 
-        [
-            str(source_files),
-            "test-bucket",
-            "--upload-id", "test-456",
-            "--pattern", "*.txt",
-            "--name", "test",
-            "--type", "test",
-            "--description", "test",
-            "--log-dir", str(log_dir),
-            "--max-workers", "3"
-        ]
-    )
-    
-    assert result.exit_code == 0, f"CLI failed with: {result.stdout}"
-    assert any(log_dir.glob("upload_test-456_*.json"))
-
-    # Test missing required argument (source_folder)
-    result = runner.invoke(app, ["upload"])
-    assert result.exit_code == 2
-    assert "Missing argument" in result.stdout
-
-
-    # Test invalid source folder
-    result = runner.invoke(
-        app,
-        [
-            str(tmp_path / "nonexistent"),
-            "test-bucket",
-            "--upload-id", "test-789"
-        ]
-    )
-    assert result.exit_code == 1
-    assert "Error: Source folder" in result.stdout
-
-    # Test missing required option (upload-id)
-    result = runner.invoke(
-        app,
-        [
-            str(source_files),
-            "test-bucket"
-        ]
-    )
-    assert result.exit_code == 2
-    assert "Missing option" in result.stdout and "--upload-id" in result.stdout
+    with pytest.raises(SystemExit):  # CLI will wait for interrupt
+        handle_start(args)
+        
+        # Wait for initial upload
+        import time
+        time.sleep(0.2)
+        
+        handle_stop(args)

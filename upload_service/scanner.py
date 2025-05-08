@@ -5,6 +5,8 @@ import logging
 from pathlib import Path
 from typing import List, Set, Dict, Optional
 
+from .models import UploadRequest
+
 logger = logging.getLogger(__name__)
 
 class FileScanner:
@@ -13,6 +15,17 @@ class FileScanner:
     def __init__(self):
         """Initialize the file scanner."""
         self._cache: Dict[str, Dict[Path, float]] = {}
+        
+    def scan(self, request: UploadRequest) -> List[Path]:
+        """Scan a folder for files matching the request pattern.
+        
+        Args:
+            request: Upload request containing folder and pattern
+            
+        Returns:
+            List of file paths found
+        """
+        return self.scan_folder(request.source_folder, request.pattern)
         
     def scan_folder(self, folder: Path, pattern: str = "*") -> List[Path]:
         """Scan a folder for files matching the pattern.

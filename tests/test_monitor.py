@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import Mock
 
 from upload_service.monitor import FolderMonitor
+from upload_service.models import MonitoredFolder
 
 def test_monitor_detects_new_file_and_triggers_callback(tmp_upload_dir):
     """Test that monitor detects new files and triggers callback."""
@@ -15,12 +16,13 @@ def test_monitor_detects_new_file_and_triggers_callback(tmp_upload_dir):
     monitor.register_callback(callback)
     
     # Register folder to monitor
-    monitor.register_folder(
-        "test-upload",
-        tmp_upload_dir,
-        "test-bucket",
-        "*.txt"
+    folder = MonitoredFolder(
+        upload_id="test-upload",
+        source_folder=tmp_upload_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
     )
+    monitor.register_folder(folder)
     
     try:
         # Wait for initial scan
@@ -50,12 +52,13 @@ def test_monitor_does_not_reupload_unmodified_files(tmp_upload_dir):
     test_file.write_text("test content")
     
     # Register folder to monitor
-    monitor.register_folder(
-        "test-upload",
-        tmp_upload_dir,
-        "test-bucket",
-        "*.txt"
+    folder = MonitoredFolder(
+        upload_id="test-upload",
+        source_folder=tmp_upload_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
     )
+    monitor.register_folder(folder)
     
     try:
         # Wait for potential callbacks
@@ -78,12 +81,13 @@ def test_monitor_uploads_modified_file(tmp_upload_dir):
     test_file.write_text("initial content")
     
     # Register folder to monitor
-    monitor.register_folder(
-        "test-upload",
-        tmp_upload_dir,
-        "test-bucket",
-        "*.txt"
+    folder = MonitoredFolder(
+        upload_id="test-upload",
+        source_folder=tmp_upload_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
     )
+    monitor.register_folder(folder)
     
     try:
         # Wait for initial scan
@@ -113,12 +117,13 @@ def test_monitor_handles_deleted_files(tmp_upload_dir):
     test_file.write_text("test content")
     
     # Register folder to monitor
-    monitor.register_folder(
-        "test-upload",
-        tmp_upload_dir,
-        "test-bucket",
-        "*.txt"
+    folder = MonitoredFolder(
+        upload_id="test-upload",
+        source_folder=tmp_upload_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
     )
+    monitor.register_folder(folder)
     
     try:
         # Wait for initial scan
@@ -144,12 +149,13 @@ def test_monitor_stops_on_unregister(tmp_upload_dir):
     monitor.register_callback(callback)
     
     # Register folder to monitor
-    monitor.register_folder(
-        "test-upload",
-        tmp_upload_dir,
-        "test-bucket",
-        "*.txt"
+    folder = MonitoredFolder(
+        upload_id="test-upload",
+        source_folder=tmp_upload_dir,
+        destination_bucket="test-bucket",
+        pattern="*.txt"
     )
+    monitor.register_folder(folder)
     
     # Unregister folder
     monitor.unregister_folder("test-upload")
@@ -177,8 +183,20 @@ def test_monitor_handles_multiple_folders(tmp_path):
     folder2.mkdir()
     
     # Register both folders
-    monitor.register_folder("upload1", folder1, "bucket1", "*.txt")
-    monitor.register_folder("upload2", folder2, "*.txt", "bucket2")
+    folder1_config = MonitoredFolder(
+        upload_id="upload1",
+        source_folder=folder1,
+        destination_bucket="bucket1",
+        pattern="*.txt"
+    )
+    folder2_config = MonitoredFolder(
+        upload_id="upload2",
+        source_folder=folder2,
+        destination_bucket="bucket2",
+        pattern="*.txt"
+    )
+    monitor.register_folder(folder1_config)
+    monitor.register_folder(folder2_config)
     
     try:
         # Wait for initial setup

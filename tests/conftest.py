@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 import boto3
-from moto import mock_s3
+from moto import mock_aws as moto_mock_aws
 
 from upload_service.models import UploadRequest, UploadState
 from upload_service.tracker import UploadTracker
@@ -52,9 +52,9 @@ def upload_request(tmp_upload_dir):
     )
 
 @pytest.fixture
-def mock_s3():
+def mock_aws():
     """Mock S3 client using moto."""
-    with mock_s3():
+    with moto_mock_aws():
         s3 = boto3.client('s3')
         # Create test bucket
         s3.create_bucket(Bucket='test-bucket')
@@ -66,7 +66,7 @@ def upload_tracker(tmp_log_dir, tmp_state_file):
     return UploadTracker(log_dir=tmp_log_dir, state_file=tmp_state_file)
 
 @pytest.fixture
-def s3_uploader(mock_s3):
+def s3_uploader(mock_aws):
     """Create a test S3 uploader."""
     return S3Uploader()
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict, Set
 import threading
 
-from .models import UploadRequest
+from .models import UploadRequest, MonitoredFolder
 from .scanner import FileScanner
 from .uploader import S3Uploader
 from .tracker import UploadTracker
@@ -53,12 +53,13 @@ class UploadCoordinator:
             self._active_uploads[upload_id] = uploader
             
             # Register folder for monitoring
-            self.monitor.register_folder(
-                upload_id,
-                Path(state.source_folder),
-                state.destination_bucket,
-                state.pattern
+            folder = MonitoredFolder(
+                upload_id=upload_id,
+                source_folder=Path(state.source_folder),
+                destination_bucket=state.destination_bucket,
+                pattern=state.pattern
             )
+            self.monitor.register_folder(folder)
             
             # Process any incomplete files
             incomplete_files = self.tracker.get_incomplete_files(upload_id)
@@ -136,12 +137,13 @@ class UploadCoordinator:
             self._active_uploads[request.upload_id] = uploader
             
         # Start folder monitoring
-        self.monitor.register_folder(
-            request.upload_id,
-            request.source_folder,
-            request.destination_bucket,
-            request.pattern
+        folder = MonitoredFolder(
+            upload_id=request.upload_id,
+            source_folder=request.source_folder,
+            destination_bucket=request.destination_bucket,
+            pattern=request.pattern
         )
+        self.monitor.register_folder(folder)
         
         # Initial scan and upload
         files = self.scanner.scan_folder(request.source_folder, request.pattern)

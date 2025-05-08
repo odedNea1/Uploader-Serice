@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
-from upload_service.models import UploadRequest, UploadResult
+from upload_service.models import UploadRequest, UploadResult, UploadSummary
 from upload_service.coordinator import UploadCoordinator
 
 def test_end_to_end_upload_with_state_persistence(tmp_upload_dir, tmp_log_dir, tmp_state_file):
@@ -27,18 +27,25 @@ def test_end_to_end_upload_with_state_persistence(tmp_upload_dir, tmp_log_dir, t
     
     # Mock S3 uploader
     mock_uploader = MagicMock()
-    mock_uploader.upload_files.return_value.results = [
-        UploadResult(
-            file_path=file1,
-            s3_key="test1.txt",
-            success=True
-        ),
-        UploadResult(
-            file_path=file2,
-            s3_key="test2.txt",
-            success=True
-        )
-    ]
+    summary = UploadSummary(
+        upload_id="test-upload",
+        total_files=2,
+        successful_uploads=2,
+        failed_uploads=0,
+        results=[
+            UploadResult(
+                file_path=file1,
+                s3_key="test1.txt",
+                success=True
+            ),
+            UploadResult(
+                file_path=file2,
+                s3_key="test2.txt",
+                success=True
+            )
+        ]
+    )
+    mock_uploader.upload_files.return_value = summary
     
     with patch('upload_service.coordinator.S3Uploader', return_value=mock_uploader):
         # Start upload
@@ -122,19 +129,35 @@ def test_partial_upload_resume(tmp_upload_dir, tmp_log_dir, tmp_state_file):
     
     # Mock S3 uploader
     mock_uploader = MagicMock()
-    mock_uploader.upload_files.return_value.results = [
-        UploadResult(
-            file_path=test_file,
-            s3_key="large.txt",
-            success=True,
-            multipart_upload_id="mpu-123",
-            part_number=2,
-            offset=1024 * 512
-        )
-    ]
+    summary = UploadSummary(
+        upload_id="test-upload",
+        total_files=1,
+        successful_uploads=1,
+        failed_uploads=0,
+        results=[
+            UploadResult(
+                file_path=test_file,
+                s3_key="large.txt",
+                success=True,
+                multipart_upload_id="mpu-123",
+                part_number=2,
+                offset=1024 * 512
+            )
+        ]
+    )
+    mock_uploader.upload_files.return_value = summary
     
     with patch('upload_service.coordinator.S3Uploader', return_value=mock_uploader):
-        # Let coordinator resume upload
+        # Start monitoring
+        request = UploadRequest(
+            upload_id="test-upload",
+            source_folder=tmp_upload_dir,
+            destination_bucket="test-bucket",
+            pattern="*.txt"
+        )
+        coordinator.start_upload(request)
+        
+        # Wait for upload
         time.sleep(0.2)
         
         # Verify file was uploaded
@@ -167,18 +190,27 @@ def test_cli_registers_and_triggers_monitoring(tmp_upload_dir, tmp_log_dir, tmp_
         type=None,
         description=None,
         config=None,
-        verbose=False
+        verbose=False,
+        log_dir=str(tmp_log_dir),
+        state_file=str(tmp_state_file)
     )
     
     # Mock S3 uploader
     mock_uploader = MagicMock()
-    mock_uploader.upload_files.return_value.results = [
-        UploadResult(
-            file_path=test_file,
-            s3_key="test.txt",
-            success=True
-        )
-    ]
+    summary = UploadSummary(
+        upload_id="test-upload",
+        total_files=1,
+        successful_uploads=1,
+        failed_uploads=0,
+        results=[
+            UploadResult(
+                file_path=test_file,
+                s3_key="test.txt",
+                success=True
+            )
+        ]
+    )
+    mock_uploader.upload_files.return_value = summary
     
     with patch('upload_service.coordinator.S3Uploader', return_value=mock_uploader):
         # Start upload

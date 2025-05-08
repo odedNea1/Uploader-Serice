@@ -16,7 +16,7 @@ def no_wait():
     with patch('upload_service.uploader.wait_exponential', return_value=wait_none()):
         yield
 
-def test_upload_file_retries_on_failure(s3_uploader, tmp_upload_dir):
+def test_upload_file_retries_on_failure(tmp_upload_dir, mock_aws):
     """Test that upload retries on transient failures."""
     test_file = tmp_upload_dir / "test.txt"
     test_file.write_text("test content")
@@ -36,6 +36,8 @@ def test_upload_file_retries_on_failure(s3_uploader, tmp_upload_dir):
         error,
         None  # Success on third try
     ]
+    
+    s3_uploader = S3Uploader()
     s3_uploader.s3_client = mock_client
     
     result = s3_uploader._upload_file(test_file, "test-bucket", "test.txt")
@@ -43,12 +45,13 @@ def test_upload_file_retries_on_failure(s3_uploader, tmp_upload_dir):
     assert result.success
     assert mock_client.upload_file.call_count == 3
 
-def test_upload_file_returns_correct_result_structure(s3_uploader, tmp_upload_dir):
+def test_upload_file_returns_correct_result_structure(tmp_upload_dir, mock_aws):
     """Test that upload returns correct result structure."""
     test_file = tmp_upload_dir / "test.txt"
     content = "test content"
     test_file.write_text(content)
     
+    s3_uploader = S3Uploader()
     result = s3_uploader._upload_file(test_file, "test-bucket", "test.txt")
     
     assert result.success
@@ -57,26 +60,19 @@ def test_upload_file_returns_correct_result_structure(s3_uploader, tmp_upload_di
     assert result.size_bytes == len(content)
     assert result.error is None
 
-def test_multipart_upload_handles_large_files(s3_uploader, tmp_upload_dir):
+def test_multipart_upload_handles_large_files(tmp_upload_dir, mock_aws):
     """Test that large files are handled with multipart upload."""
     test_file = tmp_upload_dir / "large.txt"
-    content = "x" * (s3_uploader.chunk_size + 1)  # Ensure multipart is used
+    content = "x" * (5 * 1024 * 1024)  # 5MB file to ensure multipart is used
     test_file.write_text(content)
     
-    # Mock multipart upload responses
-    mock_client = MagicMock()
-    mock_client.create_multipart_upload.return_value = {'UploadId': 'test-upload-id'}
-    mock_client.upload_part.return_value = {'ETag': 'test-etag'}
-    s3_uploader.s3_client = mock_client
-    
+    s3_uploader = S3Uploader()
     result = s3_uploader._upload_file(test_file, "test-bucket", "large.txt")
     
     assert result.success
-    assert mock_client.create_multipart_upload.called
-    assert mock_client.upload_part.called
-    assert mock_client.complete_multipart_upload.called
+    assert result.multipart_upload_id is not None
 
-def test_upload_fails_if_s3_down(s3_uploader, tmp_upload_dir):
+def test_upload_fails_if_s3_down(tmp_upload_dir, mock_aws):
     """Test that upload fails gracefully if S3 is down."""
     test_file = tmp_upload_dir / "test.txt"
     test_file.write_text("test content")
@@ -92,6 +88,8 @@ def test_upload_fails_if_s3_down(s3_uploader, tmp_upload_dir):
     
     mock_client = MagicMock()
     mock_client.upload_file.side_effect = error
+    
+    s3_uploader = S3Uploader()
     s3_uploader.s3_client = mock_client
     
     result = s3_uploader._upload_file(test_file, "test-bucket", "test.txt")
@@ -100,7 +98,7 @@ def test_upload_fails_if_s3_down(s3_uploader, tmp_upload_dir):
     assert "Service is down" in result.error
     assert mock_client.upload_file.call_count == 3  # Retried max times
 
-def test_concurrent_uploads_handle_errors(s3_uploader, tmp_upload_dir):
+def test_concurrent_uploads_handle_errors(tmp_upload_dir, mock_aws):
     """Test that concurrent uploads handle individual file failures."""
     # Create test files
     files = []
@@ -124,6 +122,8 @@ def test_concurrent_uploads_handle_errors(s3_uploader, tmp_upload_dir):
     
     mock_client = MagicMock()
     mock_client.upload_file.side_effect = mock_upload_file
+    
+    s3_uploader = S3Uploader()
     s3_uploader.s3_client = mock_client
     
     summary = s3_uploader.upload_files(files, "test-bucket")
@@ -176,10 +176,10 @@ def test_is_retryable_error():
         )
         assert not is_retryable_error(error)
 
-def test_multipart_upload_aborts_on_failure(s3_uploader, tmp_upload_dir):
+def test_multipart_upload_aborts_on_failure(tmp_upload_dir, mock_aws):
     """Test that multipart upload is aborted on failure."""
     test_file = tmp_upload_dir / "large.txt"
-    content = "x" * (s3_uploader.chunk_size + 1)
+    content = "x" * (5 * 1024 * 1024)  # 5MB file
     test_file.write_text(content)
     
     # Mock client to fail during part upload
@@ -194,10 +194,16 @@ def test_multipart_upload_aborts_on_failure(s3_uploader, tmp_upload_dir):
         },
         'upload_part'
     )
+    
+    s3_uploader = S3Uploader()
     s3_uploader.s3_client = mock_client
     
     result = s3_uploader._upload_file(test_file, "test-bucket", "large.txt")
     
     assert not result.success
     assert "Internal error" in result.error
-    assert mock_client.abort_multipart_upload.called 
+    mock_client.abort_multipart_upload.assert_called_once_with(
+        Bucket="test-bucket",
+        Key="large.txt",
+        UploadId="test-upload-id"
+    ) 

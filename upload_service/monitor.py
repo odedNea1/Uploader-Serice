@@ -30,42 +30,32 @@ class FolderMonitor:
         """
         self._callback = callback
 
-    def register_folder(self, upload_id: str, source_folder: Path, 
-                       destination_path: str, pattern: str = "*") -> None:
+    def register_folder(self, folder: MonitoredFolder) -> None:
         """Register a new folder to monitor.
         
         Args:
-            upload_id: Unique identifier for this upload task
-            source_folder: Local folder path to monitor
-            destination_path: S3 destination path
-            pattern: File pattern to match (glob syntax)
+            folder: MonitoredFolder configuration
         """
         with self._lock:
-            if upload_id in self._monitors:
-                logger.warning(f"Upload ID {upload_id} already being monitored")
+            if folder.upload_id in self._monitors:
+                logger.warning(f"Upload ID {folder.upload_id} already being monitored")
                 return
 
-            self._monitors[upload_id] = MonitoredFolder(
-                source_folder=source_folder,
-                destination_path=destination_path,
-                pattern=pattern,
-                last_check=time.time(),
-                known_files=set(p for p in source_folder.glob(pattern) if p.is_file())
-            )
+            self._monitors[folder.upload_id] = folder
             
             stop_event = threading.Event()
-            self._stop_events[upload_id] = stop_event
+            self._stop_events[folder.upload_id] = stop_event
             
             thread = threading.Thread(
                 target=self._monitor_folder,
-                args=(upload_id, stop_event),
-                name=f"monitor-{upload_id}",
+                args=(folder.upload_id, stop_event),
+                name=f"monitor-{folder.upload_id}",
                 daemon=True
             )
-            self._monitor_threads[upload_id] = thread
+            self._monitor_threads[folder.upload_id] = thread
             thread.start()
             
-            logger.info(f"Started monitoring folder {source_folder} for upload {upload_id}")
+            logger.info(f"Started monitoring folder {folder.source_folder} for upload {folder.upload_id}")
 
     def unregister_folder(self, upload_id: str) -> None:
         """Stop monitoring a folder.
@@ -121,11 +111,16 @@ class FolderMonitor:
                     
             except Exception as e:
                 logger.error(f"Error monitoring folder for upload {upload_id}: {e}")
+            finally:
+                logger.info(f"thread exiting: {upload_id}")
                 
             stop_event.wait(self._scan_interval)
 
     def stop_all(self) -> None:
-        """Stop all monitoring threads."""
+        # Copy keys first while holding the lock
         with self._lock:
-            for upload_id in list(self._monitors.keys()):
-                self.unregister_folder(upload_id) 
+            upload_ids = list(self._monitors.keys())
+
+        # Call unregister_folder outside the lock to avoid deadlock
+        for upload_id in upload_ids:
+            self.unregister_folder(upload_id)

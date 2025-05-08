@@ -1,7 +1,7 @@
 """
 Module containing data models for the upload service.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Set
 
@@ -80,8 +80,9 @@ class UploadState:
 @dataclass
 class MonitoredFolder:
     """Represents a folder being monitored for changes."""
+    upload_id: str
     source_folder: Path
-    destination_path: str
+    destination_bucket: str
     pattern: str
-    last_check: float
-    known_files: Set[Path] 
+    last_check: float = 0.0
+    known_files: Set[Path] = field(default_factory=set) 
