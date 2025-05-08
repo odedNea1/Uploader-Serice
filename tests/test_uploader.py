@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from botocore.exceptions import ClientError
 from tenacity import wait_none
 
-from upload_service.uploader import S3Uploader, is_retryable_error
+from upload_service.uploader import S3Uploader
 
 # Patch wait strategy to speed up tests
 @pytest.fixture(autouse=True)
