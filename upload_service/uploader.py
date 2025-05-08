@@ -35,13 +35,6 @@ class S3Uploader:
         self.max_workers = max_workers
         self.chunk_size = chunk_size
         
-    @retry(
-        retry=retry_if_exception_type(Exception),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        before=before_log(logger, logging.DEBUG),
-        after=after_log(logger, logging.DEBUG)
-    )
     def _upload_file(self, file_path: Path, bucket: str, s3_key: str,
                      metadata: Optional[Dict[str, str]] = None) -> UploadResult:
         """Upload a single file to S3 with retries.
@@ -55,29 +48,23 @@ class S3Uploader:
         Returns:
             UploadResult object
         """
-        try:
-            size_bytes = file_path.stat().st_size
+        size_bytes = file_path.stat().st_size
             
-            # Use multipart upload for large files
-            if size_bytes > self.chunk_size:
-                return self._multipart_upload(file_path, bucket, s3_key, metadata)
+        # Use multipart upload for large files
+        if size_bytes > self.chunk_size:
+            return self._multipart_upload(file_path, bucket, s3_key, metadata)
+        try:
+            
             
             # Simple upload for small files
             extra_args = {'Metadata': metadata} if metadata else {}
-            response = self.s3_client.upload_file(
-                str(file_path),
-                bucket,
-                s3_key,
-                ExtraArgs=extra_args
-            )
-            
+            self._upload_file_with_retries(file_path, bucket, s3_key, extra_args)
             return UploadResult(
                 file_path=file_path,
                 s3_key=s3_key,
                 success=True,
                 error=None,
-                size_bytes=size_bytes,
-                etag=response.get('ETag') if isinstance(response, dict) else None
+                size_bytes=size_bytes
             )
             
         except Exception as e:
@@ -276,3 +263,58 @@ class S3Uploader:
             failed_uploads=failed,
             results=results
         ) 
+    
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        before=before_log(logger, logging.DEBUG),
+        after=after_log(logger, logging.DEBUG)
+    )
+    def _upload_file_with_retries(self, file_path: Path, bucket: str, s3_key: str, extra_args: Dict[str, str]) -> None:
+        self.s3_client.upload_file(str(file_path), bucket, s3_key, ExtraArgs=extra_args)
+
+    @retry(
+        retry=retry_if_exception_type(Exception),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        before=before_log(logger, logging.DEBUG),
+        after=after_log(logger, logging.DEBUG)
+    )
+    def _multipart_upload_with_retries(self, file_path: Path, bucket: str, s3_key: str, extra_args: Dict[str, str]) -> UploadResult:
+        size_bytes = file_path.stat().st_size
+        mpu = self.s3_client.create_multipart_upload(Bucket=bucket, Key=s3_key, **extra_args)
+        upload_id = mpu['UploadId']
+        parts = []
+        offset = 0
+        part_number = 1
+
+        try:
+            with open(file_path, 'rb') as f:
+                while offset < size_bytes:
+                    chunk = f.read(self.chunk_size)
+                    part = self._upload_part(bucket, s3_key, upload_id, part_number, chunk)
+                    parts.append({'PartNumber': part_number, 'ETag': part['ETag']})
+                    offset += len(chunk)
+                    part_number += 1
+
+            self.s3_client.complete_multipart_upload(
+                Bucket=bucket,
+                Key=s3_key,
+                UploadId=upload_id,
+                MultipartUpload={'Parts': parts}
+            )
+
+            return UploadResult(
+                file_path=file_path,
+                s3_key=s3_key,
+                success=True,
+                error=None,
+                size_bytes=size_bytes,
+                etag=parts[-1]['ETag'] if parts else None,
+                multipart_upload_id=upload_id
+            )
+
+        except Exception:
+            self.s3_client.abort_multipart_upload(Bucket=bucket, Key=s3_key, UploadId=upload_id)
+            raise
