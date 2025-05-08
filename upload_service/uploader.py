@@ -49,7 +49,6 @@ class S3Uploader:
             UploadResult object
         """
         size_bytes = file_path.stat().st_size
-            
         # Use multipart upload for large files
         if size_bytes > self.chunk_size:
             return self._multipart_upload(file_path, bucket, s3_key, metadata)
